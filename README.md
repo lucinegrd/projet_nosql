@@ -1,7 +1,26 @@
-
 # Lancement de l’environnement & Chargement des données
 
-## 1. Lancement des services MongoDB et Neo4j (Docker)
+## 1. Prérequis
+
+* **Docker Desktop** installé et en fonctionnement
+
+  👉 [https://docs.docker.com/desktop/install/windows-install/]()
+* **Python 3.10+**
+* Un environnement virtuel (recommandé) :
+
+<pre class="overflow-visible!" data-start="1463" data-end="1518"><div class="contain-inline-size rounded-2xl relative bg-token-sidebar-surface-primary"><div class="sticky top-9"><div class="absolute end-0 bottom-0 flex h-9 items-center pe-2"><div class="bg-token-bg-elevated-secondary text-token-text-secondary flex items-center gap-4 rounded-sm px-2 font-sans text-xs"></div></div></div><div class="overflow-y-auto p-4" dir="ltr"><code class="whitespace-pre! language-bash"><span><span>python -m venv .venv
+.venv\Scripts\activate
+</span></span></code></div></div></pre>
+
+Installer les dépendances Python :
+
+<pre class="overflow-visible!" data-start="1556" data-end="1599"><div class="contain-inline-size rounded-2xl relative bg-token-sidebar-surface-primary"><div class="sticky top-9"><div class="absolute end-0 bottom-0 flex h-9 items-center pe-2"><div class="bg-token-bg-elevated-secondary text-token-text-secondary flex items-center gap-4 rounded-sm px-2 font-sans text-xs"></div></div></div><div class="overflow-y-auto p-4" dir="ltr"><code class="whitespace-pre! language-bash"><span><span>pip install -r requirements.txt</span></span></code></div></div></pre>
+
+---
+
+
+
+## 2. Lancement des services MongoDB et Neo4j (Docker)
 
 Le projet utilise **Docker** pour exécuter les deux bases NoSQL nécessaires :
 
@@ -45,7 +64,7 @@ Identifiants Neo4j par défaut :
 
 ---
 
-## 2. Chargement des données dans MongoDB
+## 3. Chargement des données dans MongoDB
 
 Les fichiers UniProt (`.tsv`) doivent être placés dans le dossier :
 
@@ -63,7 +82,7 @@ Depuis l’environnement Python du projet :
 
 Le script :
 
-* lit le fichier `.tsv.gz`
+* lit le fichier `.tsv`
 * extrait les champs pertinents (ID, noms, séquence, InterPro, EC number…)
 * transforme chaque entrée en document JSON structuré
 * insère les documents dans la base `protein_db` (collection `proteins_mouse`)
