@@ -16,7 +16,7 @@ except Exception as e :
 
 
 FILE_PATH = "data/uniprotkb_AND_model_organism_10090_2025_11_14.tsv"
-MONGO_URI = "mongodb://localhost:27017"
+MONGO_URI = "mongodb://mongo:27017"
 DB_NAME = "protein_db"
 COLLECTION_NAME = "proteins_mouse"
 
