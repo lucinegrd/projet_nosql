@@ -1,9 +1,5 @@
 """
-Script pour charger un fichier UniProt .tsv.gz dans MongoDB.
-
-Assure-toi que MongoDB tourne en local (mongodb://localhost:27017)
-avant de lancer :
-    python load_mongo.py
+Script pour charger un fichier UniProt .tsv dans MongoDB.
 """
 
 import math
