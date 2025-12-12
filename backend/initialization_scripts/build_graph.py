@@ -1,27 +1,33 @@
 """
-Script pour construire le graphe Neo4j à partir des données MongoDB.
+Script optimisé pour construire le graphe Neo4j à partir des données MongoDB
+en utilisant la librairie Graph Data Science (GDS) pour le calcul de similarité.
 """
 
+import os
 import math
 from collections import defaultdict
 from pymongo import MongoClient
-from neo4j import GraphDatabase
+from neo4j import GraphDatabase, exceptions
 
 # ---------------------------
 # CONFIG MONGO / NEO4J
 # ---------------------------
 
-MONGO_URI = "mongodb://localhost:27017"
+
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017") # Fallback à localhost si non défini
 DB_NAME = "protein_db"
 COLLECTION_NAME = "proteins_mouse"
 
-NEO4J_URI = "bolt://localhost:7687"  
-NEO4J_USER = "neo4j"
-NEO4J_PASSWORD = "password"   
+NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687") # Doit être "bolt://neo4j:7687" dans Docker
+NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "password")
 
-# Seuils pour filtrer les arêtes
-MIN_SHARED_DOMAINS = 2               
-MIN_JACCARD = 0.1                 
+# Seuils pour filtrer les arêtes (Les seuils GDS sont souvent basés sur le poids)
+MIN_JACCARD_WEIGHT = 0.1 # Le seuil pour le coefficient de Jaccard
+
+# Le seuil MIN_SHARED_DOMAINS n'est plus directement applicable dans le calcul
+# GDS pur, mais GDS est souvent plus performant que l'implémentation manuelle.
+# On peut potentiellement ajouter un filtrage post-GDS si nécessaire.
 
 
 def import_proteins_and_domains(col, driver):
@@ -43,11 +49,11 @@ def import_proteins_and_domains(col, driver):
     })
 
     with driver.session() as session:
-        #contraintes
+        # Contraintes
         session.run("CREATE CONSTRAINT IF NOT EXISTS FOR (p:Protein) REQUIRE p.uniprot_id IS UNIQUE")
         session.run("CREATE CONSTRAINT IF NOT EXISTS FOR (d:Domain) REQUIRE d.interpro_id IS UNIQUE")
 
-        # On fait des batchs pour éviter d’envoyer 100k MERGE d’un coup
+        # On fait des batchs
         batch = []
         batch_size = 500
 
@@ -85,8 +91,6 @@ def import_batch(session, proteins_batch):
     """
     Import d’un batch de protéines + leurs domaines dans Neo4j.
     """
-
-    #on ajoute la proteine, ses domaines (la contraite MERGE évite les doublons) et les relations HAS_DOMAIN
     query = """
     UNWIND $rows AS row
 
@@ -102,121 +106,127 @@ def import_batch(session, proteins_batch):
       MERGE (d:Domain {interpro_id: interpro_id})
       MERGE (p)-[:HAS_DOMAIN]->(d)
     """
-    # Pour les protéines sans domaines, UNWIND row.interpro_ids va être vide
-
     session.run(query, rows=proteins_batch)
 
 
-def build_similarity_edges(col, driver):
+def build_similarity_edges_gds(driver):
     """
-    Construit les arêtes SIMILAR_TO entre protéines en fonction des interpro_ids.
-      - construction d'un index domaine -> liste de protéines
-      - calcul des intersections / unions
-      - application des seuils
-      - création des arêtes dans Neo4j
+    Construit les arêtes SIMILAR entre protéines en utilisant
+    l'algorithme de Similarité de Nœud (Node Similarity) de GDS,
+    basé sur le coefficient de Jaccard sur les domaines partagés.
     """
-    # 1) Récupérer les protéines avec au moins 1 domaine
-    cursor = col.find(
-        {"interpro_ids.0": {"$exists": True}},  # au moins un élément dans la liste
-        projection={"_id": 1, "uniprot_id": 1, "interpro_ids": 1}
-    )
+    GRAPH_NAME = "protein_domain_graph"
+    RELATIONSHIP_TYPE = "SIMILAR"
 
-    # Mapping uniprot_id -> set(domains)
-    protein_domains = {}
-    # Mapping domain -> liste d’uniprot_id
-    domain_to_proteins = defaultdict(list)
-
-    print("Construction des index en mémoire...")
-    for doc in cursor:
-        uniprot_id = doc.get("uniprot_id") or doc.get("_id")
-        interpro_ids = doc.get("interpro_ids", [])
-        if not uniprot_id or not interpro_ids:
-            continue
-
-        dom_set = set(interpro_ids)
-        protein_domains[uniprot_id] = dom_set
-        for d in dom_set:
-            domain_to_proteins[d].append(uniprot_id)
-
-    print(f"{len(protein_domains)} protéines avec domaines.")
-    print(f"{len(domain_to_proteins)} domaines différents.")
-
-    # 2) Compter les domaines partagés pour chaque paire de protéines
-    shared_count = defaultdict(int)
-
-    print("Comptage des domaines partagés par paire de protéines...")
-    for domain, prot_list in domain_to_proteins.items():
-        n = len(prot_list)
-        if n < 2:
-            continue
-        prot_list = sorted(prot_list)
-        for i in range(n):
-            for j in range(i + 1, n):
-                u = prot_list[i]
-                v = prot_list[j]
-                shared_count[(u, v)] += 1
-
-    print(f"{len(shared_count)} paires de protéines partagent au moins un domaine.")
-
-    # 3) Calcul du Jaccard et filtrage
-    edges_to_create = []
-    for (u, v), inter_size in shared_count.items():
-        dom_u = protein_domains[u]
-        dom_v = protein_domains[v]
-        union_size = len(dom_u.union(dom_v))
-        if union_size == 0:
-            continue
-        jaccard = inter_size / union_size
-
-        if inter_size >= MIN_SHARED_DOMAINS and jaccard >= MIN_JACCARD:
-            edges_to_create.append({
-                "u": u,
-                "v": v,
-                "weight": jaccard,
-                "shared": inter_size,
-                "union": union_size,
-            })
-
-    print(f"{len(edges_to_create)} arêtes SIMILAR_TO à créer après filtrage.")
-
-    # 4) Insertion dans Neo4j (par batch)
-    batch_size = 5000
+    # Nettoyage des anciennes relations et de la projection
     with driver.session() as session:
-        for i in range(0, len(edges_to_create), batch_size):
-            batch = edges_to_create[i:i + batch_size]
-            
-            query = """
-            UNWIND $rows AS row
-            MATCH (p1:Protein {uniprot_id: row.u})
-            MATCH (p2:Protein {uniprot_id: row.v})
-            MERGE (p1)-[r:SIMILAR_TO]-(p2)
-            SET r.weight = row.weight,
-                r.shared_domains = row.shared,
-                r.union_domains = row.union
-            """
-            session.run(query, rows=batch)
+        session.run(f"""
+        MATCH ()-[r:{RELATIONSHIP_TYPE}]-()
+        DELETE r
+        """)
+        session.run(f"""
+        CALL gds.graph.exists('{GRAPH_NAME}') YIELD exists
+        WITH exists
+        WHERE exists
+        CALL gds.graph.drop('{GRAPH_NAME}') YIELD graphName
+        RETURN graphName
+        """)
 
-            print(f"  - Batch {i//batch_size + 1} inséré ({len(batch)} arêtes).")
 
+    print("1) Projection du graphe (Proteins connectées via Domains)...")
+    
+    # Projection d'un graphe bipartite Proteins <-> Domains
+    projection_query = f"""
+    CALL gds.graph.project(
+        '{GRAPH_NAME}',
+        ['Protein', 'Domain'],
+        'HAS_DOMAIN'
+    )
+    YIELD graphName, nodeCount, relationshipCount
+    """
+    
+    with driver.session() as session:
+        result = session.run(projection_query)
+        summary = result.single()
+        if summary:
+            print(f"  - Graphe projeté '{summary['graphName']}' : {summary['nodeCount']} nœuds, {summary['relationshipCount']} relations.")
+        else:
+            raise Exception("Échec de la projection du graphe GDS.")
+    
+    print("2) Calcul de la Similarité de Nœud (Jaccard) et écriture des arêtes...")
+
+    # Calcul de la similarité entre Nœuds Protein, basé sur leurs voisins Domain
+    similarity_query = f"""
+    CALL gds.nodeSimilarity.write(
+        '{GRAPH_NAME}',
+        {{
+            similarityMetric: 'JACCARD',
+            writeRelationshipType: '{RELATIONSHIP_TYPE}',
+            writeProperty: 'jaccard_weight',
+            similarityCutoff: {MIN_JACCARD_WEIGHT}
+        }}
+    )
+    YIELD nodesCompared, relationshipsWritten
+    """
+
+    with driver.session() as session:
+        result = session.run(similarity_query)
+        summary = result.single()
+
+        # On ajoute ensuite les propriétés `shared_domains` et `union_domains`
+        # en utilisant Cypher, car GDS ne les écrit pas directement dans cet algo.
+        # Ce n'est pas un goulot d'étranglement majeur.
+        # NOTE: Si le besoin en performance était maximal, on s'arrêterait ici.
+        update_properties_query = f"""
+        MATCH (p1:Protein)-[r:{RELATIONSHIP_TYPE}]-(p2:Protein)
+        WITH p1, p2, r
+        // Récupérer les domaines des deux protéines
+        MATCH (p1)-[:HAS_DOMAIN]->(d1:Domain)
+        WITH p1, p2, r, collect(d1.interpro_id) AS domains1
+        MATCH (p2)-[:HAS_DOMAIN]->(d2:Domain)
+        WITH p1, p2, r, domains1, collect(d2.interpro_id) AS domains2
+        // Calculer l'intersection et l'union en Cypher
+        WITH r,
+             size(apoc.coll.intersection(domains1, domains2)) AS shared,
+             size(apoc.coll.union(domains1, domains2)) AS union
+        SET r.shared_domains = shared,
+            r.union_domains = union
+        RETURN count(r) AS updated_relationships_count
+        """
+
+        update_result = session.run(update_properties_query)
+        updated_count = update_result.single()["updated_relationships_count"]
+
+    print("3) Suppression de la projection GDS...")
+    with driver.session() as session:
+        # Suppression de la projection pour libérer la mémoire serveur
+        session.run(f"CALL gds.graph.drop('{GRAPH_NAME}') YIELD graphName")
+
+    if summary:
+        print(f"  - Algorithme terminé. {summary['relationshipsWritten']} arêtes '{RELATIONSHIP_TYPE}' créées et {summary['nodesCompared']} noeuds comparés.")
+        print(f"  - {updated_count} arêtes mises à jour avec les propriétés 'shared_domains' et 'union_domains'.")
+    else:
+        raise Exception("Échec du calcul de similarité GDS.")
 
 
 def main():
-    #connnection mongo
+    # Connexion mongo
     client = MongoClient(MONGO_URI)
     db = client[DB_NAME]
     col = db[COLLECTION_NAME]
 
-    #connection neo4j
+    # Connexion neo4j
     driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
 
     print("=== Étape 1 : import des protéines et des domaines dans Neo4j ===")
     import_proteins_and_domains(col, driver)
 
-    print("=== Étape 2 : construction des arêtes SIMILAR_TO ===")
-    build_similarity_edges(col, driver)
+    print("=== Étape 2 : construction des arêtes SIMILAR_TO avec GDS ===")
+    # L'appel est maintenant sur la nouvelle fonction optimisée
+    build_similarity_edges_gds(driver)
 
     driver.close()
-    print("✅ Construction du graphe Neo4j terminée.")
+    print("✅ Construction du graphe Neo4j terminée et optimisée par GDS.")
 
 
 if __name__ == "__main__":
