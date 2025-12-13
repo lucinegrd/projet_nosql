@@ -1,12 +1,12 @@
 """
 MongoDB Query Module for Protein Database
 
-This module provides comprehensive querying functionality for the protein document store.
-It includes search capabilities by identifier, name, description and various statistics.
+Ce module fournit des fonctionnalités complètes de requête pour le magasin de documents de protéines.
+Il inclut des capacités de recherche par identifiant, nom, description et diverses statistiques.
 
-Tasks implemented:
-1. Search proteins by identifier, name, and/or description
-2. Compute statistics (labeled/unlabeled proteins count, etc.)
+Tâches implémentées :
+1. Recherche de protéines par identifiant, nom et/ou description
+2. Calcul des statistiques (nombre de protéines étiquetées/non étiquetées, etc.)
 """
 
 import os
