@@ -492,14 +492,14 @@ def demo_neo4j_queries():
                     print(f"  Trouvé: {protein.get('entry_name', 'N/A')} (Longueur: {protein.get('length', 'N/A')})")
         
         # 3. Afficher le voisinage
-        """print("\n🕸️ VOISINAGE DE LA PROTÉINE:")
+        print("\n🕸️ VOISINAGE DE LA PROTÉINE:")
         if 'sample_id' in locals():
             neighborhood = query_manager.get_protein_neighborhood(sample_id, depth=1)
             if neighborhood:
                 print(f"  Centre: {neighborhood['center_protein'].get('entry_name', 'N/A')}")
                 print(f"  Voisins: {len(neighborhood['neighbors'])}")
                 print(f"  Domaines: {len(neighborhood['domains'])}")
-                print(f"  Relations de similarité: {len(neighborhood['relationships'])}")"""
+                print(f"  Relations de similarité: {len(neighborhood['relationships'])}")
         
         # 4. Protéines isolées
         print(f"\n🏝️ ANALYSE DE L'ISOLATION:")
