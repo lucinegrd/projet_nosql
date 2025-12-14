@@ -167,11 +167,12 @@ class MongoProteinQueryManager:
             if entry_name:
                 query_conditions.append({"entry_name": entry_name})
             
-            if name:
-                query_conditions.append({"protein_name": {"$in": [name]}})
-            
             if description:
                 query_conditions.append({"$text": {"$search": description}})
+            
+            # On garde 'name' seulement si 'description' n'est pas fourni, pour éviter les doublons
+            elif name: 
+                 query_conditions.append({"$text": {"$search": name}})
             
             if not query_conditions:
                 print("❌ Pas de critères de recherche fournis")

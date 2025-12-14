@@ -100,4 +100,4 @@ def get_protein_details(protein_id):
 if __name__ == '__main__':
     print("🚀 Démarrage du serveur API Flask...")
     connect_dbs()
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5000, host='0.0.0.0')
