@@ -161,34 +161,39 @@ class MongoProteinQueryManager:
         try:
             query_conditions = []
             
+            # 1. ID UniProt (ex: A0A...)
             if identifier:
-                query_conditions.append({"uniprot_id": identifier})
+                query_conditions.append({"uniprot_id": {"$regex": identifier, "$options": "i"}})
 
+            # 2. Nom d'entrée (ex: P53_HUMAN)
             if entry_name:
-                query_conditions.append({"entry_name": entry_name})
+                query_conditions.append({"entry_name": {"$regex": entry_name, "$options": "i"}})
             
+            # 3. Noms de la protéine (ex: Cellular tumor antigen p53)
+            # MongoDB applique la regex à chaque élément si protein_names est une liste.
+            if name:
+                query_conditions.append({"protein_names": {"$regex": name, "$options": "i"}})
+            
+            # 4. Description
+            # Vérifie bien comment s'appelle ce champ dans ta base (ex: 'general_description', 'comments', ou 'description')
             if description:
-                query_conditions.append({"$text": {"$search": description}})
-            
-            # On garde 'name' seulement si 'description' n'est pas fourni, pour éviter les doublons
-            elif name: 
-                 query_conditions.append({"$text": {"$search": name}})
+                query_conditions.append({"general_description": {"$regex": description, "$options": "i"}})
             
             if not query_conditions:
                 print("❌ Pas de critères de recherche fournis")
                 return []
             
-            # Use $or to combine conditions
-            query = {"$or": query_conditions} if len(query_conditions) > 1 else query_conditions[0]
+            # Utilisation de $or : Si le terme est trouvé dans L'UN des champs, c'est un match.
+            query = {"$or": query_conditions}
             
             results = list(self.collection.find(query))
-            print(f"✅ Recherche combinée a trouvé {len(results)} protéines")
+            print(f"✅ Recherche Regex a trouvé {len(results)} protéines")
             return results
             
-        except PyMongoError as e:
+        except Exception as e:
             print(f"❌ Erreur lors de la recherche combinée : {e}")
-            return []
-    
+            return []    
+        
     def get_statistics(self) -> Dict[str, int]:
         """
         Calculer diverses statistiques sur la base de données des protéines
