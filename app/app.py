@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, render_template
 from flask_cors import CORS
 from search_queries.mongo_queries import MongoProteinQueryManager
 from search_queries.neo4j_queries import Neo4jProteinQueryManager
@@ -20,12 +20,7 @@ def connect_dbs():
     except Exception as e:
         print(f"⚠️ Erreur de connexion aux bases de données : {e}")
 
-# --- ROUTES ---
-
-@app.route('/')
-def home():
-    """Route de test pour voir si le serveur est en vie."""
-    return jsonify({"status": "API is running", "project": "NoSQL Protein Project"})
+# -------------------- ROUTES -------------------
 
 @app.route('/api/stats', methods=['GET'])
 def get_global_stats():
@@ -67,7 +62,12 @@ def search_proteins():
         results = mongo_manager.search_by_description(query)
     else:
         # par défaut : Recherche combinée
-        results = mongo_manager.combined_search(name=query, description=query)
+        results = mongo_manager.combined_search(
+            identifier=query, 
+            entry_name=query, 
+            name=query, 
+            description=query
+        )
     
     # on limite à 50 résultats pour la performance
     return jsonify(results[:50])
@@ -96,6 +96,21 @@ def get_protein_details(protein_id):
         "info": doc_info,
         "graph": graph_viz
     })
+
+# -------------------- PAGES HTML -----------------------
+
+@app.route('/')
+def page_search():
+    return render_template('search.html', active_page='search')
+
+@app.route('/stats')
+def page_stats():
+    return render_template('stats.html', active_page='stats')
+
+@app.route('/labeling')
+def page_labeling():
+    return render_template('labeling.html', active_page='labeling')
+
 
 if __name__ == '__main__':
     print("🚀 Démarrage du serveur API Flask...")
