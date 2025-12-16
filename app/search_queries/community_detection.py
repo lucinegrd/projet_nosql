@@ -82,13 +82,11 @@ class ProteinCommunityDetector:
             raise Exception("Plugin GDS requis pour la détection de communautés")
     
     def create_graph_projection(self, 
-                              min_jaccard_weight: float = 0.1,
                               relationship_weight_property: str = "jaccard_weight") -> bool:
         """
         Créer une projection de graphe pour les algorithmes GDS
         
         Args:
-            min_jaccard_weight: Similarité Jaccard minimale pour inclure les relations
             relationship_weight_property: Nom de la propriété pour les poids des relations
             
         Returns:
@@ -397,11 +395,138 @@ class ProteinCommunityDetector:
         except Exception as e:
             print(f"⚠️ Erreur lors du nettoyage de la projection : {e}")
 
+    def create_indexes(self):
+        """Créer un index pour accélérer les recherches par communauté"""
+        try:
+            with self.driver.session() as session:
+                # Création d'un index sur community_id
+                session.run("CREATE INDEX protein_community IF NOT EXISTS FOR (p:Protein) ON (p.community_id)")
+                print("✅ Index sur 'community_id' vérifié/créé.")
+        except Exception as e:
+            print(f"⚠️ Impossible de créer l'index : {e}")
+        
+    def update_ec_numbers_apoc(self):
+        """
+        Mise à jour des numéros EC des protéines en fonction des numéros EC de leurs communautés
+        en utilisant APOC pour le traitement par lots.
+        """
+        query = """
+        CALL apoc.periodic.iterate(
+            // Identifie les communautés à traiter
+            "MATCH (p:Protein) 
+            WHERE p.community_id IS NOT NULL 
+            RETURN DISTINCT p.community_id as cid",
+            
+            // Traite une communauté à la fois
+            "MATCH (p:Protein {community_id: cid})
+            WHERE p.ec_numbers IS NOT NULL
+            UNWIND p.ec_numbers as ec
+            WITH cid, collect(DISTINCT ec) as all_ecs
+            MATCH (target:Protein {community_id: cid})
+            SET target.ec_numbers = all_ecs",
+            
+            {batchSize: 1000, parallel: true, retries: 3, concurrency: 2}
+        )
+        YIELD batches, total, errorMessages, committedOperations, retries
+        RETURN batches, total, errorMessages, committedOperations, retries
+        """
+
+        try:
+            with self.driver.session() as session:
+                result = session.run(query)
+                record = result.single()
+                if record:
+                    print(f"✅ Mise à jour des numéros EC terminée :")
+                    print(f"   - Batches réalisés : {record['batches']}")
+                    print(f"   - Communautés mises à jour : {record['committedOperations']}")
+                    print(f"   - Tentatives de réessai : {record['retries']}")
+                    print(f"   - Erreurs : {len(record['errorMessages'])} messages d'erreur")
+        except Exception as e:
+            print(f"❌ Erreur lors de la mise à jour des numéros EC par APOC : {e}")
+    
+    def get_community_ec_numbers(self, community_id: int, verbose: bool = False) -> List[str]:
+        """
+        Obtenir les numéros EC uniques dans une communauté spécifique
+        
+        Args:
+            community_id: ID de la communauté
+            
+        Returns:
+            Liste des numéros EC uniques
+        """
+        try:
+            with self.driver.session() as session:
+                query = """
+                MATCH (p:Protein {community_id: $community_id})
+                WHERE p.ec_numbers IS NOT NULL
+                UNWIND p.ec_numbers AS ec_number
+                RETURN DISTINCT ec_number
+                ORDER BY ec_number
+                """
+                
+                result = session.run(query, community_id=community_id)
+                ec_numbers = [record['ec_number'] for record in result]
+                
+                if verbose:
+                    print(f"✅ {len(ec_numbers)} numéros EC dans la communauté {community_id}")
+                return ec_numbers
+                
+        except Exception as e:
+            print(f"❌ Erreur lors de l'obtention des numéros EC de la communauté : {e}")
+            return []
+    
+    def modify_ec_numbers_per_community(self, community_id: int, new_ec_numbers: List[str]):
+        """
+        Propager les mêmes numéros EC à toutes les protéines d'une communauté donnée
+        
+        Args:
+            community_id: ID de la communauté
+            new_ec_numbers: Nouvelle liste de numéros EC à attribuer
+        """
+        try:
+            with self.driver.session() as session:
+                query = """
+                MATCH (p:Protein {community_id: $community_id})
+                SET p.ec_numbers = $new_ec_numbers
+                RETURN count(p) AS updated_count
+                """
+                
+                session.run(query, community_id=community_id, new_ec_numbers=new_ec_numbers)
+                    
+        except Exception as e:
+            print(f"❌ Erreur lors de la modification des numéros EC : {e}")
+    
+    def update_ec_numbers_from_communities(self):
+        """
+        Mettre à jour les numéros EC de toutes les protéines en fonction des numéros EC de leurs communautés
+        """
+        # 1) Obtenir le nombre total de communautés
+        try:
+            with self.driver.session() as session:
+                count_query = """
+                MATCH (p:Protein)
+                WHERE p.community_id IS NOT NULL
+                RETURN DISTINCT p.community_id AS communityId
+                """
+                
+                result = session.run(count_query)
+                community_ids = [record['communityId'] for record in result]
+        except Exception as e:
+            print(f"❌ Erreur lors de l'obtention des IDs de communauté : {e}")
+            return
+        
+        # 2) Pour chaque communauté, obtenir les numéros EC et les propager
+        for community_id in community_ids:
+            ec_numbers = self.get_community_ec_numbers(community_id)
+            if ec_numbers:
+                self.modify_ec_numbers_per_community(community_id, ec_numbers)
+        
+        print("✅ Mise à jour des numéros EC terminée pour toutes les communautés")
 
 def demo_community_detection():
     """Démonstration de la détection de communautés de protéines utilisant LPA"""
 
-    detector = ProteinCommunityDetector()
+    detector = ProteinCommunityDetector(neo4j_uri="bolt://localhost:7687")
     try:
         # Connexion à Neo4j
         detector.connect()
@@ -435,9 +560,14 @@ def demo_community_detection():
         if not lpa_result:
             print("❌ Échec de LPA. Sortie.")
             return
+        
+        # 4. Propagation des numéros EC basés sur les communautés
+        print("\n🔄 STEP 4: Mise à jour des numéros EC basés sur les communautés")
+        print("-" * 50)
+        detector.update_ec_numbers_apoc()
 
-        # 4. Analyse des communautés
-        print("\n📈 STEP 4: Analyse des communautés")
+        # 5. Analyse des communautés
+        print("\n📈 STEP 5: Analyse des communautés")
         print("-" * 50)
         analysis = detector.analyze_communities()
 
