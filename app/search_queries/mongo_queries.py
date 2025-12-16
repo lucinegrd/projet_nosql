@@ -53,7 +53,7 @@ class MongoProteinQueryManager:
             self.client.close()
             print("🔌 Déconnecté de MongoDB")
     
-    def search_by_identifier(self, protein_id: str) -> Optional[Dict[str, Any]]:
+    def search_by_identifier(self, protein_id: str, case_sensitive: bool = False) -> Optional[Dict[str, Any]]:
         """
         Rechercher une protéine par son identifiant UniProt
         
@@ -64,10 +64,16 @@ class MongoProteinQueryManager:
             Document protéine ou None si non trouvé
         """
         try:
-            result = self.collection.find_one({"uniprot_id": protein_id})
-            if result:
+            if case_sensitive:
+                query = {"uniprot_id": protein_id}
+            else:
+                query = {"uniprot_id": {"$regex": protein_id, "$options": "i"}}
+
+            results = list(self.collection.find(query).limit(50))
+
+            if results:
                 print(f"✅ Protéine trouvée avec l'ID : {protein_id}")
-                return result
+                return results
             else:
                 print(f"❌ Aucune protéine trouvée avec l'ID : {protein_id}")
                 return None
@@ -75,7 +81,7 @@ class MongoProteinQueryManager:
             print(f"❌ Erreur lors de la recherche par identifiant : {e}")
             return None
     
-    def search_by_protein_name(self, protein_name: str) -> List[Dict[str, Any]]:
+    def search_by_protein_name(self, protein_name: str, case_sensitive: bool = False) -> List[Dict[str, Any]]:
         """
         Rechercher des protéines par nom 
         
@@ -86,10 +92,13 @@ class MongoProteinQueryManager:
             Liste des documents protéine correspondants
         """
         try:
-            # Correspondance exacte dans le tableau protein_names
-            query = {"protein_names": {"$in": [protein_name]}}
+            if case_sensitive:
+                query = {"protein_names": protein_name}
+            else:
+                # Utilisation de regex pour une recherche insensible à la casse, renvoie les 50 premiers résultats
+                query = {"protein_names": {"$regex": protein_name, "$options": "i"}}
             
-            results = list(self.collection.find(query))
+            results = list(self.collection.find(query).limit(50))
             print(f"✅ {len(results)} protéines trouvées correspondant au nom : '{protein_name}'")
             return results
         except PyMongoError as e:
@@ -113,7 +122,7 @@ class MongoProteinQueryManager:
             else:
                 query = {"entry_name": {"$regex": entry_name, "$options": "i"}}
             
-            results = list(self.collection.find(query))
+            results = list(self.collection.find(query).limit(50))
             print(f"✅ {len(results)} protéines trouvées correspondant au nom d'entrée : '{entry_name}'")
             return results
         except PyMongoError as e:
