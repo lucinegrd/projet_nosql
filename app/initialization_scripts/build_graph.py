@@ -65,7 +65,6 @@ def import_proteins_and_domains(col, driver):
 
             entry_name = doc.get("entry_name")
             organism = doc.get("organism")
-            sequence_name = doc.get("sequence", {}).get("aa", "")
             length = doc.get("sequence", {}).get("length")
             ec_numbers = doc.get("ec_numbers", [])
             is_labelled = bool(doc.get("is_labelled", False))
@@ -75,7 +74,6 @@ def import_proteins_and_domains(col, driver):
                 "uniprot_id": uniprot_id,
                 "entry_name": entry_name,
                 "organism": organism,
-                "sequence_name": sequence_name,
                 "length": length,
                 "ec_numbers": ec_numbers,
                 "is_labelled": is_labelled,
