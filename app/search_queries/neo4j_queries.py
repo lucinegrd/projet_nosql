@@ -14,7 +14,6 @@ Tâches implémentées :
 import os
 from typing import List, Dict, Any, Optional, Tuple
 from neo4j import GraphDatabase, exceptions
-import json
 
 
 class Neo4jProteinQueryManager:
@@ -50,7 +49,7 @@ class Neo4jProteinQueryManager:
         """Fermer la connexion Neo4j"""
         if self.driver:
             self.driver.close()
-            print("🔌 Déconnecté de Neo4j")
+            print("Déconnecté de Neo4j")
     
     def search_by_identifier(self, protein_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -162,8 +161,6 @@ class Neo4jProteinQueryManager:
                    collect(DISTINCT d) as domains,
                    collect(DISTINCT r_dom {.*, source: p.uniprot_id, target: d.interpro_id, type: type(r_dom)}) as domain_rels
             """
-            # Note: Si APOC n'est pas installé, la requête depth=2 doit être faite avec des UNWIND standards, 
-            # mais la logique ci-dessus est plus propre. Si erreur, me le signaler.
 
         try:
             with self.driver.session() as session:
@@ -191,6 +188,7 @@ class Neo4jProteinQueryManager:
         except Exception as e:
             print(f"❌ Erreur lors de l'obtention du voisinage : {e}")
             return {}  
+        
     def get_protein_domains(self, protein_id: str) -> List[Dict[str, Any]]:
         """
         Obtenir tous les domaines pour une protéine spécifique
@@ -215,6 +213,88 @@ class Neo4jProteinQueryManager:
                 return domains
         except Exception as e:
             print(f"❌ Erreur lors de l'obtention des domaines : {e}")
+            return []
+    
+    def find_proteins_by_similarity_threshold(self, min_jaccard: float = 0.3) -> List[Tuple[str, str, float]]:
+        """
+        Trouver des paires de protéines avec une similarité au-dessus du seuil
+        
+        Args:
+            min_jaccard: Seuil minimum du coefficient de Jaccard
+            
+        Returns:
+            Liste de tuples (protein1_id, protein2_id, jaccard_score)
+        """
+        query = """
+        MATCH (p1:Protein)-[r:SIMILAR]-(p2:Protein)
+        WHERE r.jaccard_weight >= $min_jaccard AND elementId(p1) < elementId(p2)
+        RETURN p1.uniprot_id as protein1, p2.uniprot_id as protein2, r.jaccard_weight as jaccard
+        ORDER BY r.jaccard_weight DESC
+        LIMIT 100
+        """
+        
+        try:
+            with self.driver.session() as session:
+                result = session.run(query, min_jaccard=min_jaccard)
+                pairs = [(record["protein1"], record["protein2"], record["jaccard"]) for record in result]
+                print(f"✅ {len(pairs)} paires de protéines avec Jaccard ≥ {min_jaccard}")
+                return pairs
+        except Exception as e:
+            print(f"❌ Erreur lors de la recherche de protéines similaires : {e}")
+            return []
+    
+    def get_proteins_by_interpro_domain(self, domain_id: str) -> List[Dict[str, Any]]:
+        """
+        Obtenir toutes les protéines contenant un domaine InterPro spécifique
+        
+        Args:
+            domain_id: Identifiant du domaine InterPro
+            
+        Returns:
+            Liste de protéines contenant le domaine
+        """
+        query = """
+        MATCH (d:Domain {interpro_id: $domain_id})<-[:HAS_DOMAIN]-(p:Protein)
+        RETURN p
+        ORDER BY p.uniprot_id
+        """
+        
+        try:
+            with self.driver.session() as session:
+                result = session.run(query, domain_id=domain_id)
+                proteins = [dict(record["p"]) for record in result]
+                print(f"✅ {len(proteins)} protéines trouvées avec le domaine {domain_id}")
+                return proteins
+        except Exception as e:
+            print(f"❌ Erreur lors de la recherche par domaine : {e}")
+            return []
+    
+    def get_proteins_by_ec_number(self, ec_number: str) -> List[Dict[str, Any]]:
+        """
+        Obtenir toutes les protéines associées à un numéro EC spécifique
+        
+        Args:
+            ec_number: Numéro EC (par exemple, '1.1.1.1')
+        
+        Returns:
+            Liste de protéines associées au numéro EC
+        """
+
+        query = """
+        MATCH (p:Protein)
+        WHERE $ec_number IN p.ec_numbers
+        RETURN p
+        ORDER BY p.uniprot_id
+        """
+        
+        try:
+            with self.driver.session() as session:
+                result = session.run(query, ec_number=ec_number)
+                proteins = [dict(record["p"]) for record in result]
+                print(f"✅ {len(proteins)} protéines trouvées avec le numéro EC {ec_number}")
+                return proteins
+        except Exception as e:
+            print(f"❌ Erreur lors de la recherche par numéro EC : {e}")
             return []
     
     def get_statistics(self) -> Dict[str, Any]:
@@ -302,60 +382,6 @@ class Neo4jProteinQueryManager:
         except Exception as e:
             print(f"❌ Erreur lors du calcul des statistiques : {e}")
             return {}
-    
-    def find_proteins_by_similarity_threshold(self, min_jaccard: float = 0.3) -> List[Tuple[str, str, float]]:
-        """
-        Trouver des paires de protéines avec une similarité au-dessus du seuil
-        
-        Args:
-            min_jaccard: Seuil minimum du coefficient de Jaccard
-            
-        Returns:
-            Liste de tuples (protein1_id, protein2_id, jaccard_score)
-        """
-        query = """
-        MATCH (p1:Protein)-[r:SIMILAR]-(p2:Protein)
-        WHERE r.jaccard_weight >= $min_jaccard AND elementId(p1) < elementId(p2)
-        RETURN p1.uniprot_id as protein1, p2.uniprot_id as protein2, r.jaccard_weight as jaccard
-        ORDER BY r.jaccard_weight DESC
-        LIMIT 100
-        """
-        
-        try:
-            with self.driver.session() as session:
-                result = session.run(query, min_jaccard=min_jaccard)
-                pairs = [(record["protein1"], record["protein2"], record["jaccard"]) for record in result]
-                print(f"✅ {len(pairs)} paires de protéines avec Jaccard ≥ {min_jaccard}")
-                return pairs
-        except Exception as e:
-            print(f"❌ Erreur lors de la recherche de protéines similaires : {e}")
-            return []
-    
-    def get_proteins_by_interpro_domain(self, domain_id: str) -> List[Dict[str, Any]]:
-        """
-        Obtenir toutes les protéines contenant un domaine InterPro spécifique
-        
-        Args:
-            domain_id: Identifiant du domaine InterPro
-            
-        Returns:
-            Liste de protéines contenant le domaine
-        """
-        query = """
-        MATCH (d:Domain {interpro_id: $domain_id})<-[:HAS_DOMAIN]-(p:Protein)
-        RETURN p
-        ORDER BY p.uniprot_id
-        """
-        
-        try:
-            with self.driver.session() as session:
-                result = session.run(query, domain_id=domain_id)
-                proteins = [dict(record["p"]) for record in result]
-                print(f"✅ {len(proteins)} protéines trouvées avec le domaine {domain_id}")
-                return proteins
-        except Exception as e:
-            print(f"❌ Erreur lors de la recherche par domaine : {e}")
-            return []
     
     def export_neighborhood_for_visualization(self, protein_id: str, depth: int = 1) -> List[Dict[str, Any]]:
         """
@@ -532,7 +558,7 @@ def demo_neo4j_queries():
         print("="*60)
         
         # 1. Statistiques du graphe
-        print("\n📊 STATISTIQUES DU GRAPHE:")
+        print("\n STATISTIQUES DU GRAPHE:")
         stats = query_manager.get_statistics()
         for key, value in stats.items():
             if key == 'top_connected_proteins':
@@ -543,7 +569,7 @@ def demo_neo4j_queries():
                 print(f"  {key}: {value}")
         
         # 2. Recherche par identifiant
-        print("\n🔍 RECHERCHE PAR IDENTIFIANT:")
+        print("\n RECHERCHE PAR IDENTIFIANT:")
         # Obtenir un identifiant de protéine exemple pour la démo
         with query_manager.driver.session() as session:
             result = session.run("MATCH (p:Protein) RETURN p.uniprot_id LIMIT 1")
@@ -555,7 +581,7 @@ def demo_neo4j_queries():
                     print(f"  Trouvé: {protein.get('entry_name', 'N/A')} (Longueur: {protein.get('length', 'N/A')})")
         
         # 3. Afficher le voisinage
-        print("\n🕸️ VOISINAGE DE LA PROTÉINE:")
+        print("\n VOISINAGE DE LA PROTÉINE:")
         if 'sample_id' in locals():
             neighborhood = query_manager.get_protein_neighborhood(sample_id, depth=1)
             if neighborhood:
@@ -565,7 +591,7 @@ def demo_neo4j_queries():
                 print(f"  Relations de similarité: {len(neighborhood['relationships'])}")
         
         # 4. Protéines isolées
-        print(f"\n🏝️ ANALYSE DE L'ISOLATION:")
+        print(f"\n ANALYSE DE L'ISOLATION:")
         isolated_count = stats.get('isolated_proteins', 0)
         total_count = stats.get('total_proteins', 0)
         if total_count > 0:
@@ -574,7 +600,7 @@ def demo_neo4j_queries():
             print(f"  Protéines connectées: {total_count - isolated_count} ({100 - isolation_rate:.1f}%)")
         
         # 5. Paires à haute similarité
-        print("\n🤝 PAIRES À HAUTE SIMILARITÉ:")
+        print("\n PAIRES À HAUTE SIMILARITÉ:")
         similar_pairs = query_manager.find_proteins_by_similarity_threshold(0.5)
         for i, (p1, p2, jaccard) in enumerate(similar_pairs[:3]):
             print(f"  {i+1}. {p1} ↔ {p2} (Jaccard: {jaccard:.3f})")
