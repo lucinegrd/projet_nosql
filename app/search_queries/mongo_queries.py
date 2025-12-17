@@ -18,7 +18,7 @@ from pymongo.errors import PyMongoError
 class MongoProteinQueryManager:
     """Gestionnaire de requêtes MongoDB pour la base de données des protéines"""
     
-    def __init__(self, mongo_uri: str = None, db_name: str = "protein_db", collection_name: str = "proteins_mouse"):
+    def __init__(self, mongo_uri: str = None, db_name: str = "protein_db", collection_name: str = "all_proteins"):
         """
         Initialiser la connexion MongoDB
         
