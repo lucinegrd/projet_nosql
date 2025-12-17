@@ -1,79 +1,113 @@
-# Lancement de l’Environnement NoSQL
+# Projet NoSQL - Analyse de Données Protéiques
 
-Ce projet utilise **Docker Compose** pour orchestrer trois services indispensables :
+## Description
 
-* **MongoDB** : stockage documentaire des protéines (Task 1)
-* **Neo4j** : base orientée graphe pour la similarité des protéines (Task 2)
-* **Backend Python** : exécute automatiquement les scripts d’initialisation (`load_mongo.py` et `build_graph.py`) au démarrage
+Application d'analyse de données protéiques utilisant une architecture hybride combinant MongoDB (stockage documentaire) et Neo4j (graphe de similarité). L'application permet de rechercher, analyser et visualiser des informations sur les protéines provenant de la base UniProt.
 
-L’ensemble est entièrement automatisé :  **un seul lancement Docker charge les données et construit le graphe**.
+### Architecture
 
-## 1. Prérequis
+Le projet s'articule autour de trois services Docker :
+
+* **MongoDB** : stockage documentaire des données protéiques
+* **Neo4j** : base orientée graphe pour analyser les similarités entre protéines
+* **Backend Python (Flask)** : API et interface web pour interroger les données
+
+Les scripts d'initialisation (`load_mongo.py` et `build_graph.py`) s'exécutent automatiquement au démarrage pour charger les données et construire le graphe de similarité.
+
+---
+
+## Lancement de l'Application
+
+### Prérequis
 
 * **Docker Desktop** installé et en fonctionnement
+  * [Guide d'installation Windows](https://docs.docker.com/desktop/install/windows-install/)
 
-  [https://docs.docker.com/desktop/install/windows-install/]()
-* Les fichiers UniProt (`.tsv` ou `.tsv.gz`) placés dans : `data/`
+> **Note** : Aucune installation Python locale n'est nécessaire, tout s'exécute dans Docker.
 
-Aucune installation de Python n’est requise pour exécuter l’environnement Docker.
+### Démarrer l'environnement
 
-## 2. Lancement des services (Docker)
+À la racine du projet, exécutez la commande :
 
-Les trois services sont définis dans `docker-compose.yml` :
+```bash
+docker compose up --build -d
+```
 
-* `nosql_mongo`
-* `nosql_neo4j`
-* `nosql_backend` (exécute automatiquement les scripts Python)
+Cette commande va :
+1. Construire les images Docker
+2. Démarrer les trois services (MongoDB, Neo4j, Backend)
+3. Charger automatiquement les données dans MongoDB
+4. Construire le graphe de similarité dans Neo4j
 
-### Démarrer l’environnement
+### Vérifier le déploiement
 
-À la racine du projet :
+Pour vérifier que tous les conteneurs sont actifs :
 
-<pre class="overflow-visible!" data-start="1450" data-end="1490"><div class="contain-inline-size rounded-2xl relative bg-token-sidebar-surface-primary"><div class="sticky top-9"><div class="absolute end-0 bottom-0 flex h-9 items-center pe-2"><div class="bg-token-bg-elevated-secondary text-token-text-secondary flex items-center gap-4 rounded-sm px-2 font-sans text-xs"></div></div></div><div class="overflow-y-auto p-4" dir="ltr"><code class="whitespace-pre! language-bash"><span><span>docker compose up --build -d
-</span></span></code></div></div></pre>
+```bash
+docker ps
+```
 
-### Vérification
-
-<pre class="overflow-visible!" data-start="1513" data-end="1534"><div class="contain-inline-size rounded-2xl relative bg-token-sidebar-surface-primary"><div class="sticky top-9"><div class="absolute end-0 bottom-0 flex h-9 items-center pe-2"><div class="bg-token-bg-elevated-secondary text-token-text-secondary flex items-center gap-4 rounded-sm px-2 font-sans text-xs"></div></div></div><div class="overflow-y-auto p-4" dir="ltr"><code class="whitespace-pre! language-bash"><span><span>docker ps
-</span></span></code></div></div></pre>
-
-Vous devez voir trois conteneurs actifs :
-
+Vous devriez voir trois conteneurs en état `Up` :
 * `nosql_mongo`
 * `nosql_neo4j`
 * `nosql_backend`
 
-Les scripts d’initialisation Python ont été lancés automatiquement par le service backend :
-
-* **Chargement des données protéiques dans MongoDB**
-* **Construction du graphe de similarité dans Neo4j** (si `build_graph.py` est présent)
-
-<pre class="overflow-visible!" data-start="704" data-end="725"><div class="contain-inline-size rounded-2xl relative bg-token-sidebar-surface-primary"><div class="sticky top-9"><div class="absolute end-0 bottom-0 flex h-9 items-center pe-2"><div class="bg-token-bg-elevated-secondary text-token-text-secondary flex items-center gap-4 rounded-sm px-2 font-sans text-xs"></div></div></div><div class="overflow-y-auto p-4" dir="ltr"><code class="whitespace-pre! language-bash"><span><span>docker ps
-</span></span></code></div></div></pre>
-
-Vous devez voir au moins deux conteneurs en état `Up` :
-
-* `nosql_mongo`
-* `nosql_neo4j`
-
 ### Accès aux services
 
-| Service                   | Adresse                                     |
-| ------------------------- | ------------------------------------------- |
-| MongoDB                   | `localhost:27017`                         |
-| Neo4j Browser             | [http://localhost:7474]()                      |
-| Neo4j Bolt                | `bolt://localhost:7687`                   |
-| Backend (Python, interne) | Accessible via le service `nosql_backend` |
+| Service | Adresse | Identifiants |
+|---------|---------|--------------|
+| **Application Web** | http://localhost:5000 | - |
+| **MongoDB** | `localhost:27017` | - |
+| **Neo4j Browser** | http://localhost:7474 | neo4j / password |
+| **Neo4j Bolt** | `bolt://localhost:7687` | neo4j / password |
 
-Identifiants Neo4j par défaut :
+---
 
-<pre class="overflow-visible!" data-start="2180" data-end="2224"><div class="contain-inline-size rounded-2xl relative bg-token-sidebar-surface-primary"><div class="sticky top-9"><div class="absolute end-0 bottom-0 flex h-9 items-center pe-2"><div class="bg-token-bg-elevated-secondary text-token-text-secondary flex items-center gap-4 rounded-sm px-2 font-sans text-xs"></div></div></div><div class="overflow-y-auto p-4" dir="ltr"><code class="whitespace-pre!"><span><span>username :</span><span></span><span>neo4j</span><span>
-</span><span>password :</span><span></span><span>password</span></span></code></div></div></pre>
+## Fonctionnalités
 
-## 3. Relancer l’environnement proprement
+* **Recherche de protéines** : recherche par nom, fonction, organisme
+* **Visualisation de statistiques** : analyse des données protéiques
+* **Graphe de similarité** : exploration des relations entre protéines
+* **Détection de communautés** : identification de groupes de protéines similaires
 
-Arrêter les services : `docker compose down`
+---
 
-Supprimer les données (Mongo + Neo4j) : `docker compose down -v`
+## Commandes Utiles
 
-Recréer l’environnement : `docker compose up --build -d`
+### Arrêter l'environnement
+```bash
+docker compose down
+```
+
+### Supprimer les données et tout réinitialiser
+```bash
+docker compose down -v
+docker compose up --build -d
+```
+
+### Consulter les logs
+```bash
+# Tous les services
+docker compose logs -f
+
+# Un service spécifique
+docker compose logs -f nosql_backend
+```
+
+---
+
+## Contributeurs
+
+* **Maxence AGRA**
+* **Lucine GIRAUD**
+* **Lina LEKBOURI**
+
+---
+
+## Technologies Utilisées
+
+* **Python 3.x** avec Flask
+* **MongoDB** pour le stockage documentaire
+* **Neo4j** pour les graphes de relations
+* **Docker & Docker Compose** pour l'orchestration des services
+* **HTML/CSS/JavaScript** pour l'interface web
