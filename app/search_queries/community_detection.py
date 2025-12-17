@@ -405,27 +405,49 @@ class ProteinCommunityDetector:
         except Exception as e:
             print(f"⚠️ Impossible de créer l'index : {e}")
         
-    def update_ec_numbers_apoc(self):
+    def update_ec_numbers_weighted(self, threshold: float = 0.3):
         """
-        Mise à jour des numéros EC des protéines en fonction des numéros EC de leurs communautés
-        en utilisant APOC pour le traitement par lots.
+        Mise à jour avec SEUIL : Ne propage que les EC présents chez au moins X% 
+        des membres étiquetés de la communauté.
+        
+        Args:
+            threshold: Le pourcentage minimum de présence requis (0.3 = 30%)
         """
+        print(f"🔄 Début de la propagation pondérée (Seuil: {threshold:.0%})...")
+        
         query = """
         CALL apoc.periodic.iterate(
             // Identifie les communautés à traiter
             "MATCH (p:Protein) 
-            WHERE p.community_id IS NOT NULL 
-            RETURN DISTINCT p.community_id as cid",
+             WHERE p.community_id IS NOT NULL 
+             RETURN DISTINCT p.community_id as cid",
             
-            // Traite une communauté à la fois
+            // Traite une communauté à la fois avec calcul de fréquence
             "MATCH (p:Protein {community_id: cid})
-            WHERE p.ec_numbers IS NOT NULL
-            UNWIND p.ec_numbers as ec
-            WITH cid, collect(DISTINCT ec) as all_ecs
-            MATCH (target:Protein {community_id: cid})
-            SET target.ec_numbers_calculated = all_ecs",
+             WHERE p.ec_numbers IS NOT NULL AND size(p.ec_numbers) > 0
+             
+             // Compte le nombre total de protéines annotées dans ce groupe
+             WITH cid, count(p) as total_labeled
+             
+             // Compte la fréquence de chaque EC
+             MATCH (p:Protein {community_id: cid})
+             WHERE p.ec_numbers IS NOT NULL
+             UNWIND p.ec_numbers as ec
+             WITH cid, total_labeled, ec, count(*) as frequency
+             
+             // Filtre selon le seuil
+             WITH cid, ec, frequency, total_labeled, (toFloat(frequency) / total_labeled) as score
+             WHERE score >= $threshold
+             
+             // Collecte les EC valides
+             WITH cid, collect(ec) as valid_ecs
+             
+             // Mise à jour des cibles
+             MATCH (target:Protein {community_id: cid})
+             WHERE target.ec_numbers IS NULL OR size(target.ec_numbers) = 0
+             SET target.ec_numbers_calculated = valid_ecs",
             
-            {batchSize: 1000, parallel: true, retries: 3, concurrency: 2}
+            {batchSize: 1000, parallel: true, retries: 3, concurrency: 2, params: {threshold: $threshold}}
         )
         YIELD batches, total, errorMessages, committedOperations, retries
         RETURN batches, total, errorMessages, committedOperations, retries
@@ -433,22 +455,14 @@ class ProteinCommunityDetector:
 
         try:
             with self.driver.session() as session:
-                result = session.run(query)
+                result = session.run(query, threshold=threshold)
                 record = result.single()
                 if record:
-                    print(f"✅ Mise à jour des numéros EC terminée :")
-                    print(f"   - Batches réalisés : {record['batches']}")
-                    print(f"   - Communautés mises à jour : {record['committedOperations']}")
-                    print(f"   - Tentatives de réessai : {record['retries']}")
-                    print(f"   - Erreurs : {len(record['errorMessages'])} messages d'erreur")
-                return {
-                    "batches": record['batches'],
-                    "total_operations": record['total'],
-                    "committed": record['committedOperations'],
-                    "errors": len(record['errorMessages'])
-                }
+                    print(f"✅ Propagation terminée :")
+                    print(f"   - Communautés traitées : {record['committedOperations']}")
+                    print(f"   - Seuil appliqué : {threshold}")
         except Exception as e:
-            print(f"❌ Erreur lors de la mise à jour des numéros EC par APOC : {e}")
+            print(f"❌ Erreur lors de la mise à jour pondérée : {e}")
     
     def get_community_ec_numbers(self, community_id: int, verbose: bool = False) -> List[str]:
         """
@@ -683,7 +697,7 @@ def demo_community_detection():
         # 4. Propagation des numéros EC basés sur les communautés
         print("\n🔄 STEP 4: Mise à jour des numéros EC basés sur les communautés")
         print("-" * 50)
-        detector.update_ec_numbers_apoc()
+        detector.update_ec_numbers_weighted()
 
         # 5. Analyse des communautés
         print("\n📈 STEP 5: Analyse des communautés")

@@ -167,7 +167,7 @@ def api_apply_union():
     detector = ProteinCommunityDetector()
     try:
         detector.connect()
-        stats = detector.update_ec_numbers_apoc()
+        stats = detector.update_ec_numbers_weighted(0.3)
         
         return jsonify({
             "status": "success", 
